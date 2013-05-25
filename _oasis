@@ -1,0 +1,13 @@
+OASISFormat: 0.3
+Name:        skkserv-lite
+Version:     2.0a
+Synopsis:    SKK server using sqlite3 dictionaries
+Authors:     INAJIMA Daisuke
+License:     MIT
+
+Executable "skkserv-lite"
+  Path:       src
+  BuildTools: ocamlbuild
+  MainIs:     main.ml
+  BuildDepends: camomile, sqlite3, str, unix
+  CompiledObject: best
