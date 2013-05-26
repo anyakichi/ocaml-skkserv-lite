@@ -90,6 +90,15 @@ let check_argv () =
     exit 1
   end
 
+let create_pid_file file =
+  let pid = Printf.sprintf "%d\n" (getpid ()) in
+  let fd = openfile file [O_RDWR; O_CREAT] 0o644 in
+  lockf fd F_TLOCK 0;
+  set_close_on_exec fd;
+  let len = write fd pid 0 (String.length pid) in
+  ftruncate fd len;
+  at_exit (fun () -> try Unix.unlink file with _ -> ())
+
 let daemonize () =
   let fork' () =
     match fork () with
@@ -136,6 +145,13 @@ let server () =
     if addr_info_list = [] then
       raise No_addr_info;
 
+    if !mode = SERVER_DAEMON then begin
+      handle_unix_error daemonize ();
+      match !pid_file with
+      | None -> ()
+      | Some file -> handle_unix_error create_pid_file file
+    end;
+
     if !user <> "" then begin
       let uid = try int_of_string !user with
         | Failure e ->
@@ -144,8 +160,6 @@ let server () =
       in
       handle_unix_error setuid uid
     end;
-
-    if !mode = SERVER_DAEMON then handle_unix_error daemonize ();
 
     let dicts = List.rev_map Dict.opendict !rev_argv in
 
