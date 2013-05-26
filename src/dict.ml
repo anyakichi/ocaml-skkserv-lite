@@ -29,8 +29,7 @@ let find_and_append db key accu =
   let stmt = Sqlite3.prepare db
     "SELECT candidate, annotation FROM jisyo WHERE key = ?;" in
 
-  if ng & Sqlite3.reset stmt ||
-     ng & Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT key) then
+  if ng & Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT key) then
     raise Error;
 
   rows_fold stmt
@@ -45,8 +44,7 @@ let complete_and_append db key accu =
   let stmt = Sqlite3.prepare db
     "SELECT DISTINCT key FROM jisyo WHERE key GLOB ? AND okuri_ari = 0;" in
 
-  if ng & Sqlite3.reset stmt ||
-     ng & Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT (key ^ "*")) then
+  if ng & Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT (key ^ "*")) then
     raise Error;
 
   let rev_added = rows_fold stmt
@@ -62,8 +60,7 @@ let add db key cand anno okuri_ari =
   let stmt = Sqlite3.prepare db
     "INSERT INTO jisyo VALUES (NULL, ?, ?, ?, ?);" in
 
-  if ng & Sqlite3.reset stmt ||
-     ng & Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT key) ||
+  if ng & Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT key) ||
      ng & Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT cand) ||
      ng & Sqlite3.bind stmt 3 (Sqlite3.Data.TEXT anno) ||
      ng & Sqlite3.bind stmt 4 (Sqlite3.Data.INT (int64_of_bool okuri_ari)) ||
@@ -99,8 +96,7 @@ let create_table db =
         annotation TEXT,
         okuri_ari BOOL
     );
-    CREATE INDEX keyidx ON jisyo(key);
-    "
+    CREATE INDEX keyidx ON jisyo(key);"
   in
   if ng & Sqlite3.exec db sql then
     raise Error;
