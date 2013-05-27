@@ -8,8 +8,8 @@ open Ext
 open Unix
 
 exception Close
-exception Invalid_request
-exception No_candidates
+exception Server_error
+exception Server_not_found
 
 let string_of_subentry = function
   | cand, [] -> cand
@@ -22,7 +22,7 @@ let write' fd data offs len =
 ;;
 
 let serve ~in_fd ~out_fd dicts =
-  let maxlen = 256 in
+  let maxlen = 512 in
   let buf = String.create maxlen in
 
   let len = ref (try read in_fd buf 0 maxlen with _ -> 0) in
@@ -32,7 +32,7 @@ let serve ~in_fd ~out_fd dicts =
     let result = List.fold_left (fun accu dict -> f1 dict key accu) [] dicts in
 
     if result = [] then
-      raise No_candidates;
+      raise Server_not_found;
 
     let result' = List.map f2 result in
     let rep = Encode.eucjp_of_utf8 (String.concat "/" result') in
@@ -41,20 +41,21 @@ let serve ~in_fd ~out_fd dicts =
   in
 
   try
-    if !len = 0 || !len = maxlen then
+    if !len = 0 then
       raise Close;
 
     while buf.[!len - 1] = '\n' || buf.[!len - 1] = '\r' do
       len := !len - 1
     done;
 
+    if !len = 0 then
+      raise Server_error;
+
     match buf.[0] with
     | '0' ->
         raise Close
-    | '1' | '4' when !len = 1 || buf.[!len - 1] <> ' ' ->
-        let resp = String.sub buf 0 !len in
-        resp.[0] <- '0';
-        write' out_fd (resp ^ "\n") 0 (!len + 1)
+    | '1' | '4' when buf.[!len - 1] <> ' ' ->
+        raise Server_not_found
     | '1' ->
         respond_to_lookup_request Dict.find_and_append string_of_subentry
     | '2' ->
@@ -66,15 +67,15 @@ let serve ~in_fd ~out_fd dicts =
     | '4' ->
         respond_to_lookup_request Dict.complete_and_append (fun x -> x)
     | _ ->
-        raise Invalid_request
+        raise Server_error
 
   with
   | Close ->
       close out_fd;
       `Closed
-  | Invalid_request ->
+  | Server_error ->
       write' out_fd "0" 0 1
-  | No_candidates ->
+  | Server_not_found ->
       let resp = String.sub buf 0 !len in
       resp.[0] <- '4';
       write' out_fd (resp ^ "\n") 0 (!len + 1)
