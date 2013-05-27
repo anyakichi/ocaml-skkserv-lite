@@ -11,9 +11,9 @@ exception Close
 exception Invalid_request
 exception No_candidates
 
-let string_of_subentry (cand, annos) =
-  let anno = String.concat "," annos in
-  String.concat ";" [cand; anno]
+let string_of_subentry = function
+  | cand, [] -> cand
+  | cand, annos -> String.concat ";" [cand; String.concat "," annos]
 ;;
 
 let write' fd data offs len =
