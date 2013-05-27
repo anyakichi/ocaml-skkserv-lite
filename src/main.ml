@@ -89,6 +89,7 @@ let check_argv () =
     prerr_endline "No dictionary specified";
     exit 1
   end
+;;
 
 let create_pid_file file =
   let pid = Printf.sprintf "%d\n" (getpid ()) in
@@ -98,6 +99,7 @@ let create_pid_file file =
   let len = write fd pid 0 (String.length pid) in
   ftruncate fd len;
   at_exit (fun () -> try Unix.unlink file with _ -> ())
+;;
 
 let daemonize () =
   let fork' () =
@@ -136,11 +138,11 @@ let server () =
   check_argv ();
 
   try
-    let ai_option = match !address_family with
+    let ai_options = match !address_family with
       | None -> [AI_SOCKTYPE SOCK_STREAM; AI_PASSIVE]
       | Some dom -> [AI_FAMILY dom; AI_SOCKTYPE SOCK_STREAM; AI_PASSIVE]
     in
-    let addr_info_list = getaddrinfo !host !port ai_option in
+    let addr_info_list = getaddrinfo !host !port ai_options in
 
     if addr_info_list = [] then
       raise No_addr_info;
