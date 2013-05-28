@@ -34,6 +34,8 @@ let pid_file = ref None
 
 let rev_argv = ref []
 
+let dicts = ref []
+
 let usage = "usage:
   skkserv-lite SKK-JISYO.sqlite [...]
   skkserv-lite -C [-o SKK-JISYO.sqlite] SKK-JISYO [SKK-JISYO ...]
@@ -89,6 +91,10 @@ let check_argv () =
     prerr_endline "No dictionary specified";
     exit 1
   end
+;;
+
+let open_dictionaries () =
+  dicts := List.rev_map Dict.opendict !rev_argv
 ;;
 
 let create_pid_file file =
@@ -163,24 +169,36 @@ let server () =
       handle_unix_error setuid uid
     end;
 
-    let dicts = List.rev_map Dict.opendict !rev_argv in
+    open_dictionaries ();
+
+    let servers = Hashtbl.create 64 in
 
     let listen_socks = List.map prepare_socket addr_info_list in
-    let service_socks = ref [] in
+    let writing_socks = ref [] in
 
     while true do
-      let all_socks = List.rev_append !service_socks listen_socks in
-      let (rsocks, _, _) = select all_socks [] [] (-1.0) in
+      let reading_socks =
+        Hashtbl.fold (fun fd _ accu ->
+            if List.mem fd !writing_socks then accu else fd :: accu
+          ) servers listen_socks
+      in
+      let rsocks, wsocks, _ = select reading_socks !writing_socks [] (-1.0) in
       List.iter (fun s ->
           if List.mem s listen_socks then begin
-            let (nsock, _) = accept s in
-            set_nonblock s;
-            service_socks := nsock :: !service_socks
+            let nsock, _ = accept s in
+            set_nonblock nsock;
+            Hashtbl.add servers nsock (Skkserv.create nsock nsock)
           end else
-            match Skkserv.serve s s dicts with
-            | `Closed -> service_socks := List.filter ((<>) s) !service_socks
-            | `Success -> ()    (* continue service *)
-            | `Failure -> ()    (* XXX: continue service? *)
+            let server = Hashtbl.find servers s in
+            match Skkserv.serve server !dicts with
+            | `End ->
+                close s;
+                Hashtbl.remove servers s
+            | `Reading ->
+                writing_socks := List.filter ((<>) s) !writing_socks;
+            | `Writing ->
+                if not (List.mem s !writing_socks) then
+                  writing_socks := s :: !writing_socks;
         ) rsocks;
     done
 
@@ -196,12 +214,11 @@ let server () =
 let filter () =
   check_argv ();
 
-  let dicts = List.rev_map Dict.opendict !rev_argv in
+  let server = Skkserv.create ~in_fd:stdin ~out_fd:stdout in
   while true do
-    match Skkserv.serve ~in_fd:stdin ~out_fd:stdout dicts with
-    | `Closed -> exit 0
-    | `Success -> ()    (* continue service *)
-    | `Failure -> ()    (* XXX: continue service? *)
+    match Skkserv.serve server !dicts with
+    | `End -> exit 0
+    | `Reading | `Writing -> ()
   done
 ;;
 
@@ -260,6 +277,9 @@ let () =
   Arg.parse (Arg.align speclist)
             (fun arg -> rev_argv := arg :: !rev_argv)
             usage;
+
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  Sys.set_signal Sys.sighup (Sys.Signal_handle (fun _ -> open_dictionaries ()));
 
   match !mode with
   | CREATE ->

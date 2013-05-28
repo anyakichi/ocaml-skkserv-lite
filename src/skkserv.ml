@@ -7,78 +7,152 @@ open Ext
 
 open Unix
 
-exception Close
-exception Server_error
-exception Server_not_found
+exception End
+exception Error
+exception Exit
+exception Not_enough_arguments of string
+
+type t = {
+  in_fd : file_descr;
+  out_fd : file_descr;
+  mutable rbuf : string;
+  mutable wbuf : string;
+}
+
+type command =
+  | Close
+  | Lookup of string
+  | Get_version
+  | Get_address
+  | Complete of string
+  | Continue
+  | Unknown
+
 
 let string_of_subentry = function
   | cand, [] -> cand
   | cand, annos -> String.concat ";" [cand; String.concat "," annos]
 ;;
 
-let write' fd data offs len =
-  let ret = write fd data offs len in
-  if ret = len then `Success else `Failure
+let create ~in_fd ~out_fd =
+  { in_fd = in_fd; out_fd = out_fd; rbuf = ""; wbuf = "" }
+
+let get_command req =
+  let cmd = req.[0] in
+  let rest = Str.string_after req 1 in
+
+  let cmd1 f s =
+    match Str.bounded_split_delim (Str.regexp "[ \t\r\n]+") s 2 with
+    | [arg; rest] -> f arg, rest
+    | _ -> Continue, req
+  in
+
+  match cmd with
+  | '0' -> Close, rest
+  | '1' -> cmd1 (fun x -> Lookup x) rest
+  | '2' -> Get_version, rest
+  | '3' -> Get_address, rest
+  | '4' -> cmd1 (fun x -> Complete x) rest
+  | _ -> Unknown, rest
 ;;
 
-let serve ~in_fd ~out_fd dicts =
-  let maxlen = 512 in
+let write_nb fd buf off len =
+  try write fd buf off len
+  with Unix_error (EWOULDBLOCK, _, _) | Unix_error (EAGAIN, _, _) -> 0
+;;
+
+let write_and_get_rest fd buf off len =
+  let len' = write_nb fd buf off len in
+  String.sub buf len' (len - len')
+
+let write_and_save_state server s =
+  let rest =
+    try write_and_get_rest server.out_fd s 0 (String.length s)
+    with _ -> raise End
+  in
+  server.wbuf <- rest;
+  if rest = "" then `Reading else `Writing
+;;
+
+let do_lookup_cmd dicts arg f1 f2 =
+  let key = Encode.utf8_of_eucjp arg in
+  match List.fold_left (fun accu dict -> f1 dict key accu) [] dicts with
+  | [] ->
+      arg.[0] <- '4';
+      arg ^ " \n"
+  | cands ->
+      let resp = Encode.eucjp_of_utf8 (String.concat "/" (List.map f2 cands)) in
+      String.concat "/" ["1"; resp; "\n"]
+;;
+
+let process_request server dicts =
+  let maxlen = 4096 in
   let buf = String.create maxlen in
 
-  let len = ref (try read in_fd buf 0 maxlen with _ -> 0) in
+  let rec loop req =
+    try
+      match req with
+      | "" -> `Reading
+      | _ ->
+          let cmd, rest = get_command req in
+          let resp = match cmd with
+            | Close ->
+                raise End
 
-  let respond_to_lookup_request f1 f2 =
-    let key = Encode.utf8_of_eucjp (String.sub buf 1 (!len - 2)) in
-    let result = List.fold_left (fun accu dict -> f1 dict key accu) [] dicts in
+            | Lookup arg ->
+                do_lookup_cmd dicts arg Dict.find_and_append string_of_subentry
 
-    if result = [] then
-      raise Server_not_found;
+            | Get_version ->
+                Version.version ^ " "
 
-    let result' = List.map f2 result in
-    let rep = Encode.eucjp_of_utf8 (String.concat "/" result') in
-    let rep' = String.concat "/" ["1"; rep; "\n"] in
-    write' out_fd rep' 0 (String.length rep')
+            | Get_address ->
+                let addr = try string_of_sockaddr (getsockname server.out_fd)
+                          with _ -> "" in
+                String.concat "" [gethostname (); ":"; addr; ":"; " "]
+
+            | Complete arg ->
+                do_lookup_cmd dicts arg Dict.complete_and_append (fun x -> x)
+
+            | Continue ->
+                server.rbuf <- req;
+                raise Exit
+
+            | _ -> "0"
+          in
+          match write_and_save_state server resp with
+          | `Reading -> loop rest
+          | x -> x
+    with Exit -> `Reading
   in
 
   try
-    if !len = 0 then
-      raise Close;
+    let ret =
+      try
+        match read server.in_fd buf 0 maxlen with
+        | 0 -> raise End
+        | r -> r
+      with
+      | Unix_error (EWOULDBLOCK, _, _) | Unix_error (EAGAIN, _, _) -> 0
+      | _ -> raise End
+    in
 
-    while buf.[!len - 1] = '\n' || buf.[!len - 1] = '\r' do
-      len := !len - 1
-    done;
+    let req = server.rbuf ^ (String.sub buf 0 ret) in
+    if String.length req > maxlen then
+      raise End;
 
-    if !len = 0 then
-      raise Server_error;
-
-    match buf.[0] with
-    | '0' ->
-        raise Close
-    | '1' | '4' when buf.[!len - 1] <> ' ' ->
-        raise Server_not_found
-    | '1' ->
-        respond_to_lookup_request Dict.find_and_append string_of_subentry
-    | '2' ->
-        let version = Version.version ^ " " in
-        write' out_fd version 0 (String.length version)
-    | '3' ->
-        let addr = try string_of_sockaddr (getsockname out_fd) with _ -> "" in
-        let host_info = String.concat "" [gethostname (); ":"; addr; ":"; " "]
-        in
-        write' out_fd host_info 0 (String.length host_info)
-    | '4' ->
-        respond_to_lookup_request Dict.complete_and_append (fun x -> x)
-    | _ ->
-        raise Server_error
+    loop req
 
   with
-  | Close ->
-      close out_fd;
-      `Closed
-  | Server_error ->
-      write' out_fd "0" 0 1
-  | Server_not_found ->
-      let resp = String.sub buf 0 !len in
-      resp.[0] <- '4';
-      write' out_fd (resp ^ "\n") 0 (!len + 1)
+  | End -> `End
+  | _ ->
+      prerr_endline "unexpected exception";
+      `End
+;;
+
+let serve server dicts =
+  try
+    match server.wbuf with
+    | "" -> process_request server dicts
+    | s -> write_and_save_state server s
+  with End -> `End
 ;;
