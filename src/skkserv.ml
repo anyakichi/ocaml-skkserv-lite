@@ -59,10 +59,12 @@ let serve ~in_fd ~out_fd dicts =
     | '1' ->
         respond_to_lookup_request Dict.find_and_append string_of_subentry
     | '2' ->
-        write' out_fd Version.version 0 (String.length Version.version)
+        let version = Version.version ^ " " in
+        write' out_fd version 0 (String.length version)
     | '3' ->
         let addr = try string_of_sockaddr (getsockname out_fd) with _ -> "" in
-        let host_info = String.concat "" [gethostname (); ":"; addr; ":"] in
+        let host_info = String.concat "" [gethostname (); ":"; addr; ":"; " "]
+        in
         write' out_fd host_info 0 (String.length host_info)
     | '4' ->
         respond_to_lookup_request Dict.complete_and_append (fun x -> x)
