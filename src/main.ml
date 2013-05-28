@@ -178,10 +178,7 @@ let server () =
 
     while true do
       let reading_socks =
-        Hashtbl.fold (fun fd _ accu ->
-            if List.mem fd !writing_socks then accu else fd :: accu
-          ) servers listen_socks
-      in
+        Hashtbl.fold (fun fd _ accu -> fd :: accu) servers listen_socks in
       let rsocks, wsocks, _ = select reading_socks !writing_socks [] (-1.0) in
       List.iter (fun s ->
           if List.mem s listen_socks then begin
@@ -193,13 +190,14 @@ let server () =
             match Skkserv.serve server !dicts with
             | `End ->
                 close s;
+                writing_socks := List.filter ((<>) s) !writing_socks;
                 Hashtbl.remove servers s
             | `Reading ->
                 writing_socks := List.filter ((<>) s) !writing_socks;
             | `Writing ->
                 if not (List.mem s !writing_socks) then
                   writing_socks := s :: !writing_socks;
-        ) rsocks;
+        ) (rsocks @ wsocks);
     done
 
   with
@@ -213,7 +211,7 @@ let server () =
 
 let filter () =
   check_argv ();
-
+  open_dictionaries ();
   let server = Skkserv.create ~in_fd:stdin ~out_fd:stdout in
   while true do
     match Skkserv.serve server !dicts with
@@ -287,7 +285,7 @@ let () =
   | FILTER ->
       filter ()
   | SERVER_DAEMON | SERVER_FOREGROUND ->
-      server ()
+      handle_unix_error server ()
   | VERSION ->
       print_endline Version.version
 ;;

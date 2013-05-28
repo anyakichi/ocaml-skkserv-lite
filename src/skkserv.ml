@@ -65,15 +65,6 @@ let write_and_get_rest fd buf off len =
   let len' = write_nb fd buf off len in
   String.sub buf len' (len - len')
 
-let write_and_save_state server s =
-  let rest =
-    try write_and_get_rest server.out_fd s 0 (String.length s)
-    with _ -> raise End
-  in
-  server.wbuf <- rest;
-  if rest = "" then `Reading else `Writing
-;;
-
 let do_lookup_cmd dicts arg f1 f2 =
   let key = Encode.utf8_of_eucjp arg in
   match List.fold_left (fun accu dict -> f1 dict key accu) [] dicts with
@@ -85,11 +76,19 @@ let do_lookup_cmd dicts arg f1 f2 =
       String.concat "/" ["1"; resp; "\n"]
 ;;
 
-let process_request server dicts =
+let serve server dicts =
   let maxlen = 4096 in
   let buf = String.create maxlen in
 
-  let rec loop req =
+  let write_and_save_state s =
+    let rest =
+      try write_and_get_rest server.out_fd s 0 (String.length s)
+      with _ -> raise End
+    in
+    server.wbuf <- rest;
+  in
+
+  let rec process_request req =
     try
       match req with
       | "" -> `Reading
@@ -119,13 +118,19 @@ let process_request server dicts =
 
             | _ -> "0"
           in
-          match write_and_save_state server resp with
-          | `Reading -> loop rest
-          | x -> x
+          write_and_save_state resp;
+          match server.wbuf with
+          | "" -> process_request rest
+          | _ ->
+              server.rbuf <- rest;
+              `Writing
     with Exit -> `Reading
   in
 
   try
+    if server.wbuf <> "" then
+      write_and_save_state server.wbuf;
+
     let ret =
       try
         match read server.in_fd buf 0 maxlen with
@@ -140,19 +145,15 @@ let process_request server dicts =
     if String.length req > maxlen then
       raise End;
 
-    loop req
+    match server.wbuf with
+    | "" -> process_request req
+    | _ ->
+        server.rbuf <- req;
+        `Writing
 
   with
   | End -> `End
   | _ ->
       prerr_endline "unexpected exception";
       `End
-;;
-
-let serve server dicts =
-  try
-    match server.wbuf with
-    | "" -> process_request server dicts
-    | s -> write_and_save_state server s
-  with End -> `End
 ;;
