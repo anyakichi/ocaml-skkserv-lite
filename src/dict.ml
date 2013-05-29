@@ -23,7 +23,7 @@ let rec rows_fold stmt f accu =
   | _ -> raise Error
 ;;
 
-let opendict = Sqlite3.db_open
+let opendict file = Sqlite3.db_open file
 
 let find_and_append db key accu =
   let stmt = Sqlite3.prepare db
