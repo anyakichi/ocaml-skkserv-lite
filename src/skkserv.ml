@@ -10,7 +10,7 @@ open Unix
 exception End
 exception Error
 exception Exit
-exception Not_enough_arguments of string
+exception Not_enough_data
 
 type t = {
   in_fd : file_descr;
@@ -25,35 +25,12 @@ type command =
   | Get_version
   | Get_address
   | Complete of string
-  | Continue
   | Unknown
 
 
 let string_of_subentry = function
   | cand, [] -> cand
   | cand, annos -> String.concat ";" [cand; String.concat "," annos]
-;;
-
-let create ~in_fd ~out_fd =
-  { in_fd = in_fd; out_fd = out_fd; rbuf = ""; wbuf = "" }
-
-let get_command req =
-  let cmd = req.[0] in
-  let rest = Str.string_after req 1 in
-
-  let cmd1 f s =
-    match Str.bounded_split_delim (Str.regexp "[ \t\r\n]+") s 2 with
-    | [arg; rest] -> f arg, rest
-    | _ -> Continue, req
-  in
-
-  match cmd with
-  | '0' -> Close, rest
-  | '1' -> cmd1 (fun x -> Lookup x) rest
-  | '2' -> Get_version, rest
-  | '3' -> Get_address, rest
-  | '4' -> cmd1 (fun x -> Complete x) rest
-  | _ -> Unknown, rest
 ;;
 
 let write_nb fd buf off len =
@@ -65,20 +42,82 @@ let write_and_get_rest fd buf off len =
   let len' = write_nb fd buf off len in
   String.sub buf len' (len - len')
 
+let create ~in_fd ~out_fd =
+  { in_fd = in_fd; out_fd = out_fd; rbuf = ""; wbuf = "" }
+
+(*
+ * There are two types of commands.
+ * One type has no arguments and another has one argument.
+ * An argument starts just after command character and terminated by spaces.
+ *)
+let get_command req =
+  if req = "" then
+    raise Not_enough_data;
+
+  let cmd = req.[0] in
+  let rest = Str.string_after req 1 in
+
+  let cmd1 f s =
+    match Str.bounded_split_delim (Str.regexp "[ \t\r\n]+") s 2 with
+    | [arg; rest] -> f arg, rest
+    | _ -> raise Not_enough_data
+  in
+
+  match cmd with
+  | '0' -> Close, rest
+  | '1' -> cmd1 (fun x -> Lookup x) rest
+  | '2' -> Get_version, rest
+  | '3' -> Get_address, rest
+  | '4' -> cmd1 (fun x -> Complete x) rest
+  | _ -> Unknown, rest
+;;
+
 let do_lookup_cmd dicts arg f1 f2 =
-  let key = Encode.utf8_of_eucjp arg in
-  match List.fold_left (fun accu dict -> f1 dict key accu) [] dicts with
-  | [] ->
-      arg.[0] <- '4';
-      arg ^ " \n"
-  | cands ->
-      let resp = Encode.eucjp_of_utf8 (String.concat "/" (List.map f2 cands)) in
-      String.concat "/" ["1"; resp; "\n"]
+  match Encode.utf8_of_eucjp arg with
+  | "" -> "0"
+  | key ->
+      match List.fold_left (fun accu dict -> f1 dict key accu) [] dicts with
+      | [] ->
+          arg.[0] <- '4';
+          arg ^ " \n"
+      | cands ->
+          let resp = Encode.eucjp_of_utf8 (String.concat "/" (List.map f2 cands))
+          in
+          String.concat "/" ["1"; resp; "\n"]
 ;;
 
 let serve server dicts =
-  let maxlen = 4096 in
-  let buf = String.create maxlen in
+  let process_request req =
+    try
+      let cmd, rest = get_command req in
+      match cmd with
+        | Close -> `Bye, ""
+
+        | Lookup arg ->
+            let resp =
+              do_lookup_cmd dicts arg Dict.find_and_append string_of_subentry in
+            `Success resp, rest
+
+        | Get_version ->
+            `Success (Version.version ^ " "), rest
+
+        | Get_address ->
+            let addr = try string_of_sockaddr (getsockname server.out_fd)
+                       with _ -> "" in
+            let host_info =
+              String.concat "" [gethostname (); ":"; addr; ":"; " "] in
+            `Success host_info, rest
+
+        | Complete arg ->
+            let resp =
+              do_lookup_cmd dicts arg Dict.complete_and_append (fun x -> x) in
+            `Success resp, rest
+
+        | _ -> `Success "0", rest
+    with
+    | Not_enough_data -> `Failure, req
+  in
+
 
   let write_and_save_state s =
     let rest =
@@ -88,44 +127,23 @@ let serve server dicts =
     server.wbuf <- rest;
   in
 
-  let rec process_request req =
-    try
-      match req with
-      | "" -> `Reading
-      | _ ->
-          let cmd, rest = get_command req in
-          let resp = match cmd with
-            | Close ->
-                raise End
-
-            | Lookup arg ->
-                do_lookup_cmd dicts arg Dict.find_and_append string_of_subentry
-
-            | Get_version ->
-                Version.version ^ " "
-
-            | Get_address ->
-                let addr = try string_of_sockaddr (getsockname server.out_fd)
-                          with _ -> "" in
-                String.concat "" [gethostname (); ":"; addr; ":"; " "]
-
-            | Complete arg ->
-                do_lookup_cmd dicts arg Dict.complete_and_append (fun x -> x)
-
-            | Continue ->
-                server.rbuf <- req;
-                raise Exit
-
-            | _ -> "0"
-          in
-          write_and_save_state resp;
-          match server.wbuf with
-          | "" -> process_request rest
-          | _ ->
-              server.rbuf <- rest;
-              `Writing
-    with Exit -> `Reading
+  let rec loop req =
+    match process_request req with
+    | `Bye, _ -> raise End
+    | `Failure, rest ->
+        server.rbuf <- rest;
+        `Reading
+    | `Success s, rest ->
+        write_and_save_state s;
+        match server.wbuf with
+        | "" -> loop rest
+        | _ ->
+            server.rbuf <- rest;
+            `Writing
   in
+
+  let maxlen = 4096 in
+  let buf = String.create maxlen in
 
   try
     if server.wbuf <> "" then
@@ -145,11 +163,12 @@ let serve server dicts =
     if String.length req > maxlen then
       raise End;
 
-    match server.wbuf with
-    | "" -> process_request req
-    | _ ->
-        server.rbuf <- req;
-        `Writing
+    if server.wbuf = "" then
+      loop req
+    else begin
+      server.rbuf <- req;
+      `Writing
+    end
 
   with
   | End -> `End

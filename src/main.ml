@@ -154,6 +154,12 @@ let server () =
       raise No_addr_info;
 
     if !mode = SERVER_DAEMON then begin
+      rev_argv := List.map (fun a ->
+          if Filename.is_relative a then
+            Filename.concat (Sys.getcwd ()) a
+          else
+            a
+        ) !rev_argv;
       handle_unix_error daemonize ();
       match !pid_file with
       | None -> ()
@@ -169,6 +175,10 @@ let server () =
       handle_unix_error setuid uid
     end;
 
+    Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+    Sys.set_signal Sys.sighup
+      (Sys.Signal_handle (fun _ -> open_dictionaries ()));
+
     open_dictionaries ();
 
     let servers = Hashtbl.create 64 in
@@ -179,7 +189,10 @@ let server () =
     while true do
       let reading_socks =
         Hashtbl.fold (fun fd _ accu -> fd :: accu) servers listen_socks in
-      let rsocks, wsocks, _ = select reading_socks !writing_socks [] (-1.0) in
+      let rsocks, wsocks, _ =
+        try select reading_socks !writing_socks [] (-1.0)
+        with Unix_error (EINTR, _, _) -> [], [], []
+      in
       List.iter (fun s ->
           if List.mem s listen_socks then begin
             let nsock, _ = accept s in
@@ -275,9 +288,6 @@ let () =
   Arg.parse (Arg.align speclist)
             (fun arg -> rev_argv := arg :: !rev_argv)
             usage;
-
-  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  Sys.set_signal Sys.sighup (Sys.Signal_handle (fun _ -> open_dictionaries ()));
 
   match !mode with
   | CREATE ->
