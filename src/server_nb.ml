@@ -82,13 +82,13 @@ let serve server ~in_fd ~out_fd =
   in
 
   try
-    let buf = String.create buffer_length in
-    match server.wbuf with
+    match if server.wbuf = "" then "" else write_and_save_state server.wbuf with
     | "" ->
+        let buf = String.create buffer_length in
         let ret = read_nb in_fd buf 0 buffer_length in
         loop (server.rbuf ^ (String.sub buf 0 ret))
-    | s ->
-        if write_and_save_state s = "" then Wait_readable else Wait_writable
+    | _ ->
+        Wait_writable
   with
   | Closed -> Close
   | e ->

@@ -188,8 +188,10 @@ let server () =
     let writing_socks = ref [] in
 
     while true do
-      let reading_socks =
-        Hashtbl.fold (fun fd _ accu -> fd :: accu) servers listen_socks in
+      let reading_socks = Hashtbl.fold
+        (fun s _ accu -> if List.mem s !writing_socks then accu else s :: accu)
+        servers listen_socks
+      in
       let rsocks, wsocks, _ =
         try select reading_socks !writing_socks [] (-1.0)
         with Unix_error (EINTR, _, _) -> [], [], []
