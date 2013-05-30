@@ -247,43 +247,35 @@ let create () =
     let ic = open_in jisyo in
     let okuri_ari = ref true in
     let queue = ref [] in
-    Stream.from (fun _ ->
-      match !queue with
+    let rec loop = function
       | x :: xs ->
           queue := xs;
           Some x
       | [] ->
-          try
-            let rec loop () =
-              match input_line ic with
-              | "" ->
-                  loop ()
-              | ";; okuri-ari entries." ->
-                  okuri_ari := true;
-                  loop ()
-              | ";; okuri-nasi entries." ->
-                  okuri_ari := false;
-                  loop ()
-              | line when line.[0] = ';' ->
-                  loop ()
-              | line ->
-                  let line' = Encode.utf8_of_eucjp line in
-                  let key, ent = String.split2 ' ' line' in
-                  let subents = Str.split (Str.regexp "/") ent in
-                  let ents = List.map (fun e ->
-                      let cand, anno = String.split2 ';' e in
-                      (key, cand, anno, !okuri_ari)
-                    ) subents
-                  in
-                  match ents with
-                  | [] -> None
-                  | x :: xs ->
-                      queue := xs;
-                      Some x
-            in
-            loop ()
-          with
-          | End_of_file -> None)
+          match input_line ic with
+          | "" ->
+              loop []
+          | ";; okuri-ari entries." ->
+              okuri_ari := true;
+              loop []
+          | ";; okuri-nasi entries." ->
+              okuri_ari := false;
+              loop []
+          | line when line.[0] = ';' ->
+              loop []
+          | line ->
+              try
+                let key, ent = String.split2 ' ' (Encode.utf8_of_eucjp line) in
+                let subents = Str.split (Str.regexp "/") ent in
+                let xs = List.map (fun e ->
+                    let cand, anno = String.split2 ';' e in
+                    (key, cand, anno, !okuri_ari)
+                  ) subents
+                in
+                loop xs
+              with _ -> loop []
+    in
+    Stream.from (fun _ -> try loop !queue with End_of_file -> None)
   in
   Dict.create_table dict;
   List.iter (fun jisyo -> Dict.add_from_stream dict (stream_of_jisyo jisyo))
