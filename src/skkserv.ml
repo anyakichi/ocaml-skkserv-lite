@@ -8,13 +8,11 @@ open Ext
 open Unix
 
 exception End
-exception Error
-exception Exit
 exception Not_enough_data
 
 type t = {
-  in_fd : file_descr;
-  out_fd : file_descr;
+  socket : file_descr;
+  ref_dicts : Dict.t list ref;
   mutable rbuf : string;
   mutable wbuf : string;
 }
@@ -33,17 +31,9 @@ let string_of_subentry = function
   | cand, annos -> String.concat ";" [cand; String.concat "," annos]
 ;;
 
-let write_nb fd buf off len =
-  try write fd buf off len
-  with Unix_error (EWOULDBLOCK, _, _) | Unix_error (EAGAIN, _, _) -> 0
+let create ~socket rdicts =
+  { socket = socket; ref_dicts = rdicts; rbuf = ""; wbuf = "" }
 ;;
-
-let write_and_get_rest fd buf off len =
-  let len' = write_nb fd buf off len in
-  String.sub buf len' (len - len')
-
-let create ~in_fd ~out_fd =
-  { in_fd = in_fd; out_fd = out_fd; rbuf = ""; wbuf = "" }
 
 (*
  * There are two types of commands.
@@ -81,62 +71,77 @@ let do_lookup_cmd dicts arg f1 f2 =
           arg.[0] <- '4';
           arg ^ " \n"
       | cands ->
-          let resp = Encode.eucjp_of_utf8 (String.concat "/" (List.map f2 cands))
-          in
-          String.concat "/" ["1"; resp; "\n"]
+          let resp = String.concat "/" (List.map f2 cands) in
+          String.concat "/" ["1"; Encode.eucjp_of_utf8 resp; "\n"]
 ;;
 
-let serve server dicts =
-  let process_request req =
-    try
-      let cmd, rest = get_command req in
-      match cmd with
-        | Close -> `Bye, ""
+let skkserv server input =
+  let dicts = !(server.ref_dicts) in
+  try
+    let cmd, rest = get_command input in
+    match cmd with
+      | Close -> None, `Ready ""
 
-        | Lookup arg ->
-            let resp =
-              do_lookup_cmd dicts arg Dict.find_and_append string_of_subentry in
-            `Success resp, rest
+      | Lookup arg ->
+          let resp =
+            do_lookup_cmd dicts arg Dict.find_and_append string_of_subentry in
+          Some resp, `Ready rest
 
-        | Get_version ->
-            `Success (Version.version ^ " "), rest
+      | Get_version ->
+          Some (Version.version ^ " "), `Ready rest
 
-        | Get_address ->
-            let addr = try string_of_sockaddr (getsockname server.out_fd)
-                       with _ -> "" in
-            let host_info =
-              String.concat "" [gethostname (); ":"; addr; ":"; " "] in
-            `Success host_info, rest
+      | Get_address ->
+          let addr = try string_of_sockaddr (getsockname server.socket)
+                     with _ -> "" in
+          let host_info =
+            String.concat "" [gethostname (); ":"; addr; ":"; " "] in
+          Some host_info, `Ready rest
 
-        | Complete arg ->
-            let resp =
-              do_lookup_cmd dicts arg Dict.complete_and_append (fun x -> x) in
-            `Success resp, rest
+      | Complete arg ->
+          let resp =
+            do_lookup_cmd dicts arg Dict.complete_and_append (fun x -> x) in
+          Some resp, `Ready rest
 
-        | _ -> `Success "0", rest
-    with
-    | Not_enough_data -> `Failure, req
-  in
+      | _ ->
+          Some "0", `Ready rest
+  with
+  | Not_enough_data ->
+      Some "", `Not_ready input
+;;
 
+let write_nb fd buf off len =
+  try write fd buf off len
+  with Unix_error (EWOULDBLOCK, _, _) | Unix_error (EAGAIN, _, _) -> 0
+;;
 
+let write_and_get_rest fd buf off len =
+  let len' = write_nb fd buf off len in
+  String.sub buf len' (len - len')
+;;
+
+let serve server ~in_fd ~out_fd =
   let write_and_save_state s =
     let rest =
-      try write_and_get_rest server.out_fd s 0 (String.length s)
+      try write_and_get_rest out_fd s 0 (String.length s)
       with _ -> raise End
     in
     server.wbuf <- rest;
   in
 
   let rec loop req =
-    match process_request req with
-    | `Bye, _ -> raise End
-    | `Failure, rest ->
+    match skkserv server req with
+    | None, _ ->
+        raise End
+
+    | Some output, `Not_ready rest ->
         server.rbuf <- rest;
         `Reading
-    | `Success s, rest ->
-        write_and_save_state s;
+
+    | Some output, `Ready rest ->
+        write_and_save_state output;
         match server.wbuf with
-        | "" -> loop rest
+        | "" ->
+            loop rest
         | _ ->
             server.rbuf <- rest;
             `Writing
@@ -151,7 +156,7 @@ let serve server dicts =
 
     let ret =
       try
-        match read server.in_fd buf 0 maxlen with
+        match read in_fd buf 0 maxlen with
         | 0 -> raise End
         | r -> r
       with
@@ -172,7 +177,7 @@ let serve server dicts =
 
   with
   | End -> `End
-  | _ ->
-      prerr_endline "unexpected exception";
+  | e ->
+      prerr_endline (Printexc.to_string e);
       `End
 ;;
