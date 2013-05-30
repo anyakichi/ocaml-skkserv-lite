@@ -25,6 +25,10 @@ setup.ml を使用してビルド・インストールしてください。 ::
   $ skkserv-lite -C -o SKK-JISYO.L.sqlite SKK-JISYO.L
   $ skkserv-lite -C -o SKK-JISYO.jinmei.sqlite SKK-JISYO.jinmei
 
+複数の辞書をまとめて 1 つの sqlite3 辞書に変換することもできます。 ::
+
+  $ skkserv-lite -C -o SKK-JISYO.sqlite SKK-JISYO.L SKK-JISYO.jinmei
+
 
 デーモンとして使用する場合
 --------------------------
