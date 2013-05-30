@@ -67,7 +67,7 @@ let do_lookup_cmd dicts arg f1 f2 =
   | key ->
       match List.fold_left (fun accu dict -> f1 dict key accu) [] dicts with
       | [] ->
-          String.concat "" ["4"; arg; "\n"]
+          String.concat "" ["4"; arg; " \n"]
       | cands ->
           let resp = String.concat "/" (List.map f2 cands) in
           String.concat "/" ["1"; Encode.eucjp_of_utf8 resp; "\n"]
