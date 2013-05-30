@@ -4,6 +4,7 @@
  *)
 
 open Ext
+open Server_nb
 
 open Unix
 
@@ -203,13 +204,13 @@ let server () =
           end else
             let server = Hashtbl.find servers s in
             match Server_nb.serve server s s with
-            | `End ->
+            | Close ->
                 close s;
                 writing_socks := List.filter ((<>) s) !writing_socks;
                 Hashtbl.remove servers s
-            | `Reading ->
+            | Wait_readable ->
                 writing_socks := List.filter ((<>) s) !writing_socks;
-            | `Writing ->
+            | Wait_writable ->
                 if not (List.mem s !writing_socks) then
                   writing_socks := s :: !writing_socks;
         ) (rsocks @ wsocks);
@@ -231,8 +232,8 @@ let filter () =
   let server = Server_nb.create (Skkserv.serve skkserv) in
   while true do
     match Server_nb.serve server ~in_fd:stdin ~out_fd:stdout with
-    | `End -> exit 0
-    | `Reading | `Writing -> ()
+    | Close -> exit 0
+    | Wait_readable | Wait_writable -> ()
   done
 ;;
 
