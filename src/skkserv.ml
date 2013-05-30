@@ -4,6 +4,7 @@
  *)
 
 open Ext
+open Server_nb
 
 open Unix
 
@@ -13,8 +14,6 @@ exception Not_enough_data
 type t = {
   socket : file_descr;
   ref_dicts : Dict.t list ref;
-  mutable rbuf : string;
-  mutable wbuf : string;
 }
 
 type command =
@@ -31,8 +30,8 @@ let string_of_subentry = function
   | cand, annos -> String.concat ";" [cand; String.concat "," annos]
 ;;
 
-let create ~socket rdicts =
-  { socket = socket; ref_dicts = rdicts; rbuf = ""; wbuf = "" }
+let create ~socket ref_dicts =
+  { socket = socket; ref_dicts = ref_dicts }
 ;;
 
 (*
@@ -75,109 +74,35 @@ let do_lookup_cmd dicts arg f1 f2 =
           String.concat "/" ["1"; Encode.eucjp_of_utf8 resp; "\n"]
 ;;
 
-let skkserv server input =
+let serve server input =
   let dicts = !(server.ref_dicts) in
   try
+    if String.length input > 4096 then
+      raise End;
+
     let cmd, rest = get_command input in
-    match cmd with
-      | Close -> None, `Ready ""
+    let resp = match cmd with
+      | Close ->
+          raise End;
 
       | Lookup arg ->
-          let resp =
-            do_lookup_cmd dicts arg Dict.find_and_append string_of_subentry in
-          Some resp, `Ready rest
+          do_lookup_cmd dicts arg Dict.find_and_append string_of_subentry
 
       | Get_version ->
-          Some (Version.version ^ " "), `Ready rest
+          Version.version ^ " "
 
       | Get_address ->
           let addr = try string_of_sockaddr (getsockname server.socket)
                      with _ -> "" in
-          let host_info =
-            String.concat "" [gethostname (); ":"; addr; ":"; " "] in
-          Some host_info, `Ready rest
+          String.concat "" [gethostname (); ":"; addr; ":"; " "]
 
       | Complete arg ->
-          let resp =
-            do_lookup_cmd dicts arg Dict.complete_and_append (fun x -> x) in
-          Some resp, `Ready rest
+          do_lookup_cmd dicts arg Dict.complete_and_append (fun x -> x)
 
-      | _ ->
-          Some "0", `Ready rest
-  with
-  | Not_enough_data ->
-      Some "", `Not_ready input
-;;
-
-let write_nb fd buf off len =
-  try write fd buf off len
-  with Unix_error (EWOULDBLOCK, _, _) | Unix_error (EAGAIN, _, _) -> 0
-;;
-
-let write_and_get_rest fd buf off len =
-  let len' = write_nb fd buf off len in
-  String.sub buf len' (len - len')
-;;
-
-let serve server ~in_fd ~out_fd =
-  let write_and_save_state s =
-    let rest =
-      try write_and_get_rest out_fd s 0 (String.length s)
-      with _ -> raise End
+      | _ -> "0"
     in
-    server.wbuf <- rest;
-  in
-
-  let rec loop req =
-    match skkserv server req with
-    | None, _ ->
-        raise End
-
-    | Some output, `Not_ready rest ->
-        server.rbuf <- rest;
-        `Reading
-
-    | Some output, `Ready rest ->
-        write_and_save_state output;
-        match server.wbuf with
-        | "" ->
-            loop rest
-        | _ ->
-            server.rbuf <- rest;
-            `Writing
-  in
-
-  let maxlen = 4096 in
-  let buf = String.create maxlen in
-
-  try
-    if server.wbuf <> "" then
-      write_and_save_state server.wbuf;
-
-    let ret =
-      try
-        match read in_fd buf 0 maxlen with
-        | 0 -> raise End
-        | r -> r
-      with
-      | Unix_error (EWOULDBLOCK, _, _) | Unix_error (EAGAIN, _, _) -> 0
-      | _ -> raise End
-    in
-
-    let req = server.rbuf ^ (String.sub buf 0 ret) in
-    if String.length req > maxlen then
-      raise End;
-
-    if server.wbuf = "" then
-      loop req
-    else begin
-      server.rbuf <- req;
-      `Writing
-    end
-
+    Some resp, Ready rest
   with
-  | End -> `End
-  | e ->
-      prerr_endline (Printexc.to_string e);
-      `End
+  | End -> None, Ready ""
+  | Not_enough_data -> Some "", Not_ready input
 ;;
