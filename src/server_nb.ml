@@ -5,10 +5,7 @@
 
 open Unix
 
-exception End
-
 exception Closed
-exception Error
 
 type ready =
   | Ready of string
@@ -27,15 +24,16 @@ let read_nb fd buf off len =
   try
     match read fd buf off len with
     | 0 -> raise Closed
-    | r -> r
+    | n -> n
   with
   | Unix_error (EWOULDBLOCK, _, _) | Unix_error (EAGAIN, _, _) -> 0
-  | _ -> raise Error
 ;;
 
 let write_nb fd buf off len =
   try write fd buf off len
-  with Unix_error (EWOULDBLOCK, _, _) | Unix_error (EAGAIN, _, _) -> 0
+  with
+  | Unix_error (EWOULDBLOCK, _, _) | Unix_error (EAGAIN, _, _) -> 0
+  | Unix_error (EPIPE, _, _) -> raise Closed
 ;;
 
 let write_and_get_rest fd buf off len =
@@ -49,11 +47,9 @@ let create f =
 
 let serve server ~in_fd ~out_fd =
   let write_and_save_state s =
-    let rest =
-      try write_and_get_rest out_fd s 0 (String.length s)
-      with _ -> raise End
-    in
+    let rest = write_and_get_rest out_fd s 0 (String.length s) in
     server.wbuf <- rest;
+    rest
   in
 
   let rec loop = function
@@ -63,13 +59,15 @@ let serve server ~in_fd ~out_fd =
         | None, _ ->
             raise Closed
 
-        | Some output, Not_ready rest ->
-            server.rbuf <- rest;
+        | Some "", Not_ready rest ->
             `Reading
 
+        | Some output, Not_ready rest ->
+            server.rbuf <- rest;
+            if write_and_save_state output = "" then `Reading else `Writing
+
         | Some output, Ready rest ->
-            write_and_save_state output;
-            match server.wbuf with
+            match write_and_save_state output with
             | "" ->
                 loop rest
             | _ ->
@@ -82,13 +80,11 @@ let serve server ~in_fd ~out_fd =
     match server.wbuf with
     | "" ->
         let ret = read_nb in_fd buf 0 buffer_length in
-        let req = server.rbuf ^ (String.sub buf 0 ret) in
-        loop req
+        loop (server.rbuf ^ (String.sub buf 0 ret))
     | s ->
-        write_and_save_state s;
-        if server.wbuf = "" then `Reading else `Writing
+        if write_and_save_state s = "" then `Reading else `Writing
   with
-  | Closed | Error -> `End
+  | Closed -> `End
   | e ->
       prerr_endline (Printexc.to_string e);
       `End
