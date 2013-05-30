@@ -37,12 +37,12 @@ let rev_argv = ref []
 
 let dicts = ref []
 
-let usage = "usage:
-  skkserv-lite SKK-JISYO.sqlite [...]
-  skkserv-lite -C [-o SKK-JISYO.sqlite] SKK-JISYO [SKK-JISYO ...]
-  skkserv-lite -d [options] SKK-JISYO.sqlite [...]
-  skkserv-lite -f [options] SKK-JISYO.sqlite [...]
-"
+let usage =
+  "usage:\n" ^
+  "  skkserv-lite SKK-JISYO.sqlite [...]\n" ^
+  "  skkserv-lite -C [-o SKK-JISYO.sqlite] SKK-JISYO [SKK-JISYO ...]\n" ^
+  "  skkserv-lite -d [options] SKK-JISYO.sqlite [...]\n" ^
+  "  skkserv-lite -f [options] SKK-JISYO.sqlite [...]\n"
 
 let rec speclist = [
   "-help",      Arg.Unit help, "";
@@ -169,7 +169,7 @@ let server () =
 
     if !user <> "" then begin
       let uid = try int_of_string !user with
-        | Failure e ->
+        | Failure _ ->
             try let pwent = getpwnam !user in pwent.pw_uid with
             | Not_found -> raise Invalid_user
       in
