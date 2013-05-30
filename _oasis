@@ -1,6 +1,6 @@
 OASISFormat: 0.3
 Name:        skkserv-lite
-Version:     2.0a
+Version:     2.0b
 Synopsis:    SKK server using sqlite3 dictionaries
 Authors:     INAJIMA Daisuke
 License:     MIT
