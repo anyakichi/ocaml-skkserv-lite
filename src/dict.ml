@@ -29,7 +29,7 @@ let find_and_append db key accu =
   let stmt = Sqlite3.prepare db
     "SELECT candidate, annotation FROM jisyo WHERE key = ?;" in
 
-  if ng & Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT key) then
+  if ng @@ Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT key) then
     raise Error;
 
   rows_fold stmt
@@ -44,7 +44,7 @@ let complete_and_append db key accu =
   let stmt = Sqlite3.prepare db
     "SELECT DISTINCT key FROM jisyo WHERE key GLOB ? AND okuri_ari = 0;" in
 
-  if ng & Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT (key ^ "*")) then
+  if ng @@ Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT (key ^ "*")) then
     raise Error;
 
   let rev_added = rows_fold stmt
@@ -60,17 +60,17 @@ let add db key cand anno okuri_ari =
   let stmt = Sqlite3.prepare db
     "INSERT INTO jisyo VALUES (NULL, ?, ?, ?, ?);" in
 
-  if ng & Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT key) ||
-     ng & Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT cand) ||
-     ng & Sqlite3.bind stmt 3 (Sqlite3.Data.TEXT anno) ||
-     ng & Sqlite3.bind stmt 4 (Sqlite3.Data.INT (int64_of_bool okuri_ari)) ||
+  if ng @@ Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT key) ||
+     ng @@ Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT cand) ||
+     ng @@ Sqlite3.bind stmt 3 (Sqlite3.Data.TEXT anno) ||
+     ng @@ Sqlite3.bind stmt 4 (Sqlite3.Data.INT (int64_of_bool okuri_ari)) ||
      Sqlite3.step stmt <> Sqlite3.Rc.DONE
   then
     raise Error;
 ;;
 
 let add_from_stream db stream =
-  if ng & Sqlite3.exec db "BEGIN;" then
+  if ng @@ Sqlite3.exec db "BEGIN;" then
     raise Error;
 
   try
@@ -80,7 +80,7 @@ let add_from_stream db stream =
     done
   with
   | Stream.Failure ->
-      if ng & Sqlite3.exec db "COMMIT;" then
+      if ng @@ Sqlite3.exec db "COMMIT;" then
         raise Error
   | Error ->
       ignore (Sqlite3.exec db "ROLLBACK;");
@@ -98,6 +98,6 @@ let create_table db =
     );
     CREATE INDEX keyidx ON jisyo(key);"
   in
-  if ng & Sqlite3.exec db sql then
+  if ng @@ Sqlite3.exec db sql then
     raise Error;
 ;;

@@ -3,7 +3,7 @@
  *      Extensions for standard library
  *)
 
-external ( & ) : ('a -> 'b) -> 'a -> 'b = "%apply"
+external ( @@ ) : ('a -> 'b) -> 'a -> 'b = "%apply"
 
 let ( % ) f g x = f (g x)
 
