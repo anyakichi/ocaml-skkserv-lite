@@ -21,6 +21,8 @@ type mode =
 
 let mode = ref FILTER
 
+external _exit : int -> unit = "unix_exit"
+
 (* Create mode options *)
 let out_file = ref "SKK-JISYO.sqlite"
 
@@ -113,7 +115,7 @@ let daemonize () =
     match fork () with
     | (-1) -> exit (-1)
     | 0 -> ()
-    | _ -> exit 0
+    | _ -> _exit 0
   in
 
   fork' ();
