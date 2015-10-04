@@ -214,7 +214,7 @@ let server () =
           if List.mem s listen_socks then begin
             let nsock, _ = accept s in
             set_nonblock nsock;
-            let skkserv = Skkserv.create ~socket:nsock dicts in
+            let skkserv = Skkserv.create ~fd:nsock dicts in
             let server = Server_nb.create (Skkserv.serve skkserv) in
             Hashtbl.add servers nsock server
           end else
@@ -244,7 +244,7 @@ let server () =
 let filter () =
   check_argv ();
   open_dictionaries ();
-  let skkserv = Skkserv.create ~socket:stdin dicts in
+  let skkserv = Skkserv.create ~fd:stdin dicts in
   let server = Server_nb.create (Skkserv.serve skkserv) in
   while true do
     match Server_nb.serve server ~in_fd:stdin ~out_fd:stdout with

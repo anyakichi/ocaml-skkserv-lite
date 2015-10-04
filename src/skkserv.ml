@@ -1,6 +1,5 @@
-(*
- * skkserv.ml
- *      SKK server services
+(**
+ * skkserv main routine
  *)
 
 open Ext
@@ -12,7 +11,7 @@ exception End
 exception Not_enough_data
 
 type t = {
-  socket : file_descr;
+  fd : file_descr;
   ref_dicts : Dict.t list ref;
 }
 
@@ -25,39 +24,53 @@ type command =
   | Unknown
 
 
-let string_of_subentry = function
-  | cand, [] -> cand
-  | cand, annos -> String.concat ";" [cand; String.concat "," annos]
+let create ~fd ref_dicts =
+  { fd; ref_dicts }
 ;;
 
-let create ~socket ref_dicts =
-  { socket = socket; ref_dicts = ref_dicts }
+let lstrip s =
+  let isspace c = c = ' ' || c = '\n' || c = '\r' || c = '\t' in
+  let len = String.length s in
+  let rec loop i =
+    if i = len then i
+    else if isspace s.[i] then loop (i + 1)
+    else i
+  in
+  let i = loop 0 in
+  String.sub s i (len - i)
 ;;
 
-(*
- * There are two types of commands.
- * One type has no arguments and another has one argument.
- * An argument starts just after command character and terminated by spaces.
- *)
+let split s ~on =
+  let len = String.length s in
+  let i = String.index s on in
+  (String.sub s 0 i, String.sub s (i + 1) (len - i - 1))
+;;
+
+(** [get_command req] parses request [req] and returns the first command in
+    [req] and rest of [req].
+    Raises Not_enough_data when [req] is not enough to parse and is not
+    consumed. *)
 let get_command req =
+  let get_arg s =
+    try split s ~on:' ' with Not_found -> raise Not_enough_data
+  in
+
   if req = "" then
     raise Not_enough_data;
 
   let cmd = req.[0] in
   let rest = Str.string_after req 1 in
 
-  let cmd1 f s =
-    match Str.bounded_split_delim (Str.regexp "[ \t\r\n]+") s 2 with
-    | [arg; rest] -> f arg, rest
-    | _ -> raise Not_enough_data
-  in
-
   match cmd with
   | '0' -> Close, rest
-  | '1' -> cmd1 (fun x -> Lookup x) rest
+  | '1' ->
+      let arg, rest' = get_arg rest in
+      Lookup arg, rest'
   | '2' -> Get_version, rest
   | '3' -> Get_address, rest
-  | '4' -> cmd1 (fun x -> Complete x) rest
+  | '4' ->
+      let arg, rest' = get_arg rest in
+      Complete arg, rest'
   | _ -> Unknown, rest
 ;;
 
@@ -73,9 +86,17 @@ let do_lookup_cmd dicts arg f1 f2 =
           String.concat "/" ["1"; Encode.eucjp_of_utf8 resp; "\n"]
 ;;
 
-let serve server input =
-  let dicts = !(server.ref_dicts) in
+let serve t input =
+  let string_of_entry = function
+    | cand, [] -> cand
+    | cand, annos -> String.concat ";" [cand; String.concat "," annos]
+  in
+
+  let dicts = !(t.ref_dicts) in
   try
+    let input = lstrip input in
+
+    (* force close session for too long request. *)
     if String.length input > 4096 then
       raise End;
 
@@ -85,13 +106,13 @@ let serve server input =
           raise End;
 
       | Lookup arg ->
-          do_lookup_cmd dicts arg Dict.find_and_append string_of_subentry
+          do_lookup_cmd dicts arg Dict.find_and_append string_of_entry
 
       | Get_version ->
           Version.version ^ " "
 
       | Get_address ->
-          let addr = try string_of_sockaddr (getsockname server.socket)
+          let addr = try string_of_sockaddr (getsockname t.fd)
                      with _ -> "" in
           String.concat "" [gethostname (); ":"; addr; ":"; " "]
 
