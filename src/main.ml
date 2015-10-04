@@ -134,28 +134,38 @@ let daemonize () =
   close fd
 ;;
 
-let prepare_socket ai =
+let prepare_socket ai ~v6only =
   let s = socket ai.ai_family ai.ai_socktype ai.ai_protocol in
   set_nonblock s;
   setsockopt s SO_REUSEADDR true;
+  if ai.ai_family = PF_INET6 then
+    setsockopt s IPV6_ONLY v6only;
   bind s ai.ai_addr;
   listen s 5;
   s
+;;
+
+let prepare_sockets host port opt_family =
+  let flags = [AI_SOCKTYPE SOCK_STREAM; AI_PASSIVE] in
+  match host, opt_family with
+  | "", None ->
+      getaddrinfo host port ((AI_FAMILY PF_INET6) :: flags)
+      |> ListLabels.map ~f:(prepare_socket ~v6only:false)
+  | "", Some family ->
+      getaddrinfo host port ((AI_FAMILY family) :: flags)
+      |> ListLabels.map ~f:(prepare_socket ~v6only:true)
+  | _, None ->
+      getaddrinfo host port flags
+      |> ListLabels.map ~f:(prepare_socket ~v6only:true)
+  | _, Some family ->
+      getaddrinfo host port ((AI_FAMILY family) :: flags)
+      |> ListLabels.map ~f:(prepare_socket ~v6only:true)
 ;;
 
 let server () =
   check_argv ();
 
   try
-    let ai_options = match !address_family with
-      | None -> [AI_SOCKTYPE SOCK_STREAM; AI_PASSIVE]
-      | Some dom -> [AI_FAMILY dom; AI_SOCKTYPE SOCK_STREAM; AI_PASSIVE]
-    in
-    let addr_info_list = getaddrinfo !host !port ai_options in
-
-    if addr_info_list = [] then
-      raise No_addr_info;
-
     if !mode = SERVER_DAEMON then begin
       rev_argv := List.map (fun a ->
           if Filename.is_relative a then
@@ -184,9 +194,11 @@ let server () =
 
     open_dictionaries ();
 
-    let servers = Hashtbl.create 64 in
+    let listen_socks = prepare_sockets !host !port !address_family in
+    if listen_socks = [] then
+      raise No_addr_info;
 
-    let listen_socks = List.map prepare_socket addr_info_list in
+    let servers = Hashtbl.create 64 in
     let writing_socks = ref [] in
 
     while true do
