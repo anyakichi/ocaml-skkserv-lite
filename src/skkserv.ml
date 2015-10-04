@@ -121,8 +121,8 @@ let serve t input =
 
       | _ -> "0"
     in
-    Some resp, Ready rest
+    Some (resp, rest)
   with
-  | End -> None, Ready ""
-  | Not_enough_data -> Some "", Not_ready input
+  | End -> None
+  | Not_enough_data -> Some ("", input)
 ;;

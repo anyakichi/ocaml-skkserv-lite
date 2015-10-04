@@ -12,7 +12,7 @@ type ready =
   | Not_ready of string
 
 type t = {
-  service_func : string -> string option * ready;
+  service_func : string -> (string * string) option;
   mutable rbuf : string;
   mutable wbuf : string;
 }
@@ -61,18 +61,13 @@ let serve server ~in_fd ~out_fd =
     | "" -> Wait_readable
     | req ->
         match server.service_func req with
-        | None, _ ->
+        | None ->
             raise Closed
 
-        | Some "", Not_ready rest ->
+        | Some ("", rest) ->
             Wait_readable
 
-        | Some output, Not_ready rest ->
-            server.rbuf <- rest;
-            if write_and_save_state output = "" then Wait_readable
-                                                else Wait_writable
-
-        | Some output, Ready rest ->
+        | Some (output, rest) ->
             match write_and_save_state output with
             | "" ->
                 loop rest
