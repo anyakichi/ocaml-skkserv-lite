@@ -3,7 +3,6 @@
  *)
 
 open Ext
-open Server_nb
 
 open Unix
 

@@ -9,5 +9,5 @@ Executable "skkserv-lite"
   Path:       src
   BuildTools: ocamlbuild
   MainIs:     main.ml
-  BuildDepends: camomile, sqlite3, str, unix
+  BuildDepends: camomile, lwt, lwt.unix, sqlite3, str, unix
   CompiledObject: best

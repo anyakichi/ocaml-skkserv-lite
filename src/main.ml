@@ -4,9 +4,10 @@
  *)
 
 open Ext
-open Server_nb
 
 open Unix
+
+let (>>=) = Lwt.(>>=)
 
 exception No_addr_info
 exception Invalid_user
@@ -134,9 +135,64 @@ let daemonize () =
   close fd
 ;;
 
-let prepare_socket ai ~v6only =
+let rec write_all fd buf ofs len =
+  Lwt_unix.write fd buf ofs len >>= fun n ->
+  if n = 0 || n = len then
+    Lwt.return ()
+  else
+    write_all fd buf (ofs + n) (len - n)
+;;
+
+let rec serve session ifd ofd rbuf () =
+  let rec loop req =
+    match Skkserv.serve session req with
+    | None ->
+        Lwt.return None
+    | Some ("", rest) ->
+        Lwt.return (Some rest)
+    | Some (resp, "") ->
+        write_all ofd resp 0 (String.length resp) >>= fun () ->
+        Lwt.return (Some "")
+    | Some (resp, rest) ->
+        write_all ofd resp 0 (String.length resp) >>= fun () ->
+        loop rest
+  in
+
+  let buf = String.create 4096 in
+  Lwt_unix.read ifd buf 0 4096 >>= function
+  | 0 -> Lwt.return ()
+  | n ->
+      loop @@ rbuf ^ (String.sub buf 0 n) >>= function
+      | None -> Lwt.return ()
+      | Some rest -> serve session ifd ofd rest ()
+;;
+
+let start_session sock =
+  let session = Skkserv.create ~fd:(Lwt_unix.unix_file_descr sock) dicts in
+  let finalize () =
+    Lwt_unix.close sock
+  in
+  Lwt.on_failure
+    (serve session sock sock "" () >>= finalize)
+    (fun e -> Lwt_log.error (Printexc.to_string e); ignore @@ finalize ());
+;;
+
+let accept_connection conn =
+  let sock, _ = conn in
+  start_session sock;
+  Lwt_log.info "New connection" >>= Lwt.return
+;;
+
+let run1 sock =
+  let rec loop () =
+    Lwt_unix.accept sock >>= accept_connection >>= loop
+  in
+  loop ()
+;;
+
+let create_socket ?(v6only=false) ai =
+  let open Lwt_unix in
   let s = socket ai.ai_family ai.ai_socktype ai.ai_protocol in
-  set_nonblock s;
   setsockopt s SO_REUSEADDR true;
   if ai.ai_family = PF_INET6 then
     setsockopt s IPV6_ONLY v6only;
@@ -145,21 +201,21 @@ let prepare_socket ai ~v6only =
   s
 ;;
 
-let prepare_sockets host port opt_family =
+let create_sockets host port opt_family =
   let flags = [AI_SOCKTYPE SOCK_STREAM; AI_PASSIVE] in
   match host, opt_family with
   | "", None ->
       getaddrinfo host port ((AI_FAMILY PF_INET6) :: flags)
-      |> ListLabels.map ~f:(prepare_socket ~v6only:false)
+      |> ListLabels.map ~f:(create_socket ~v6only:false)
   | "", Some family ->
       getaddrinfo host port ((AI_FAMILY family) :: flags)
-      |> ListLabels.map ~f:(prepare_socket ~v6only:true)
+      |> ListLabels.map ~f:(create_socket ~v6only:true)
   | _, None ->
       getaddrinfo host port flags
-      |> ListLabels.map ~f:(prepare_socket ~v6only:true)
+      |> ListLabels.map ~f:(create_socket ~v6only:true)
   | _, Some family ->
       getaddrinfo host port ((AI_FAMILY family) :: flags)
-      |> ListLabels.map ~f:(prepare_socket ~v6only:true)
+      |> ListLabels.map ~f:(create_socket ~v6only:true)
 ;;
 
 let server () =
@@ -194,44 +250,11 @@ let server () =
 
     open_dictionaries ();
 
-    let listen_socks = prepare_sockets !host !port !address_family in
+    let listen_socks = create_sockets !host !port !address_family in
     if listen_socks = [] then
       raise No_addr_info;
 
-    let servers = Hashtbl.create 64 in
-    let writing_socks = ref [] in
-
-    while true do
-      let reading_socks = Hashtbl.fold
-        (fun s _ accu -> if List.mem s !writing_socks then accu else s :: accu)
-        servers listen_socks
-      in
-      let rsocks, wsocks, _ =
-        try select reading_socks !writing_socks [] (-1.0)
-        with Unix_error (EINTR, _, _) -> [], [], []
-      in
-      List.iter (fun s ->
-          if List.mem s listen_socks then begin
-            let nsock, _ = accept s in
-            set_nonblock nsock;
-            let skkserv = Skkserv.create ~fd:nsock dicts in
-            let server = Server_nb.create (Skkserv.serve skkserv) in
-            Hashtbl.add servers nsock server
-          end else
-            let server = Hashtbl.find servers s in
-            match Server_nb.serve server s s with
-            | Close ->
-                close s;
-                writing_socks := List.filter ((<>) s) !writing_socks;
-                Hashtbl.remove servers s
-            | Wait_readable ->
-                writing_socks := List.filter ((<>) s) !writing_socks;
-            | Wait_writable ->
-                if not (List.mem s !writing_socks) then
-                  writing_socks := s :: !writing_socks;
-        ) (rsocks @ wsocks);
-    done
-
+    Lwt_main.run @@ Lwt.join @@ ListLabels.map listen_socks ~f:run1
   with
   | Invalid_user ->
       Printf.fprintf Pervasives.stderr "Invalid user: %s\n" !user;
@@ -242,15 +265,11 @@ let server () =
 ;;
 
 let filter () =
+  let open Lwt_unix in
   check_argv ();
   open_dictionaries ();
-  let skkserv = Skkserv.create ~fd:stdin dicts in
-  let server = Server_nb.create (Skkserv.serve skkserv) in
-  while true do
-    match Server_nb.serve server ~in_fd:stdin ~out_fd:stdout with
-    | Close -> exit 0
-    | Wait_readable | Wait_writable -> ()
-  done
+  let skkserv = Skkserv.create ~fd:Unix.stdin dicts in
+  Lwt_main.run @@ serve skkserv stdin stdout "" ()
 ;;
 
 let create () =
