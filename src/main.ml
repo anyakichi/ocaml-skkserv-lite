@@ -294,10 +294,11 @@ let create () =
               loop []
           | line ->
               try
-                let key, ent = String.split2 ' ' (Encode.utf8_of_eucjp line) in
+                let key, ent =
+                  String.split2 (Encode.utf8_of_eucjp line) ~on:' ' in
                 let subents = Str.split (Str.regexp "/") ent in
                 let xs = List.map (fun e ->
-                    let cand, anno = String.split2 ';' e in
+                    let cand, anno = String.split2 e ~on:';' in
                     (key, cand, anno, !okuri_ari)
                   ) subents
                 in

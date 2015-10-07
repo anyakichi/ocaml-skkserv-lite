@@ -27,31 +27,13 @@ let create ~fd ref_dicts =
   { fd; ref_dicts }
 ;;
 
-let lstrip s =
-  let isspace c = c = ' ' || c = '\n' || c = '\r' || c = '\t' in
-  let len = String.length s in
-  let rec loop i =
-    if i = len then i
-    else if isspace s.[i] then loop (i + 1)
-    else i
-  in
-  let i = loop 0 in
-  String.sub s i (len - i)
-;;
-
-let split s ~on =
-  let len = String.length s in
-  let i = String.index s on in
-  (String.sub s 0 i, String.sub s (i + 1) (len - i - 1))
-;;
-
 (** [get_command req] parses request [req] and returns the first command in
     [req] and rest of [req].
     Raises Not_enough_data when [req] is not enough to parse and is not
     consumed. *)
 let get_command req =
   let get_arg s =
-    try split s ~on:' ' with Not_found -> raise Not_enough_data
+    try String.split2 s ~on:' ' with Not_found -> raise Not_enough_data
   in
 
   if req = "" then
@@ -93,7 +75,7 @@ let serve t input =
 
   let dicts = !(t.ref_dicts) in
   try
-    let input = lstrip input in
+    let input = String.lstrip input in
 
     (* force close session for too long request. *)
     if String.length input > 4096 then

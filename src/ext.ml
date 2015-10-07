@@ -29,12 +29,23 @@ end
 module String = struct
   include String
 
-  let split2 sep s =
-    try
-      let i = String.index s sep in
-      String.sub s 0 i, String.sub s (i + 1) (String.length s - i - 1)
-    with Not_found ->
-      s, ""
+  let lstrip s =
+    let isspace c = c = ' ' || c = '\n' || c = '\r' || c = '\t' in
+    let len = String.length s in
+    let rec loop i =
+      if i < len && isspace s.[i] then
+        loop (i + 1)
+      else
+        i
+    in
+    let i = loop 0 in
+    String.sub s i (len - i)
+  ;;
+
+  let split2 s ~on =
+    let len = String.length s in
+    let i = String.index s on in
+    (String.sub s 0 i, String.sub s (i + 1) (len - i - 1))
   ;;
 end
 
