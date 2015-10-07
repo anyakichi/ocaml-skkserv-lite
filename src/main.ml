@@ -144,7 +144,7 @@ let rec write_all fd buf ofs len =
 ;;
 
 let rec serve session ifd ofd rbuf () =
-  let rec loop req =
+  let rec handle_req req =
     match Skkserv.serve session req with
     | None ->
         Lwt.return None
@@ -155,14 +155,14 @@ let rec serve session ifd ofd rbuf () =
         Lwt.return (Some "")
     | Some (resp, rest) ->
         write_all ofd resp 0 (String.length resp) >>= fun () ->
-        loop rest
+        handle_req rest
   in
 
   let buf = String.create 4096 in
   Lwt_unix.read ifd buf 0 4096 >>= function
   | 0 -> Lwt.return ()
   | n ->
-      loop @@ rbuf ^ (String.sub buf 0 n) >>= function
+      handle_req @@ rbuf ^ (String.sub buf 0 n) >>= function
       | None -> Lwt.return ()
       | Some rest -> serve session ifd ofd rest ()
 ;;
@@ -177,17 +177,13 @@ let start_session sock =
     (fun e -> Lwt_log.error (Printexc.to_string e); ignore @@ finalize ());
 ;;
 
-let accept_connection conn =
-  let sock, _ = conn in
-  start_session sock;
-  Lwt_log.info "New connection" >>= Lwt.return
-;;
-
 let run1 sock =
-  let rec loop () =
-    Lwt_unix.accept sock >>= accept_connection >>= loop
+  let rec accept_and_dispatch () =
+    Lwt_unix.accept sock >>= fun (nsock, _) ->
+    start_session nsock;
+    accept_and_dispatch ()
   in
-  loop ()
+  accept_and_dispatch ()
 ;;
 
 let create_socket ?(v6only=false) ai =
