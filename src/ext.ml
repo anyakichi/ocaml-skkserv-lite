@@ -1,6 +1,5 @@
-(*
- * ext.ml
- *      Extensions for standard library
+(**
+ * Extensions for standard library
  *)
 
 external ( @@ ) : ('a -> 'b) -> 'a -> 'b = "%apply"
@@ -26,6 +25,14 @@ module List = struct
   ;;
 end
 
+module ListLabels = struct
+  include ListLabels
+
+  let append_uniq = List.append_uniq
+  let append_uniq_assoc = List.append_uniq_assoc
+end
+
+
 module String = struct
   include String
 
@@ -42,12 +49,33 @@ module String = struct
     String.sub s i (len - i)
   ;;
 
-  let split2 s ~on =
+  let split2 s sep =
     let len = String.length s in
-    let i = String.index s on in
+    let i = String.index s sep in
     (String.sub s 0 i, String.sub s (i + 1) (len - i - 1))
   ;;
+
+  let split2_silent s sep =
+    try split2 s sep with Not_found -> (s, "")
+  ;;
 end
+
+module StringLabels = struct
+  include StringLabels
+
+  let lstrip = String.lstrip
+  let split2 s ~on = String.split2 s on
+  let split2_silent s ~on = String.split2_silent s on
+end
+
+
+module StdLabels = struct
+  module Array = ArrayLabels
+  (*module Bytes = BytesLabels*)
+  module List = ListLabels
+  module String = StringLabels
+end
+
 
 module Unix = struct
   include Unix

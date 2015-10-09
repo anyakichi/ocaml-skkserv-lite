@@ -3,7 +3,7 @@
  *)
 
 open Ext
-
+open StdLabels
 open Unix
 
 exception End
@@ -59,7 +59,8 @@ let do_lookup_cmd dicts arg f1 f2 =
   match Encode.utf8_of_eucjp arg with
   | "" -> "0"
   | key ->
-      match List.fold_left (fun accu dict -> f1 dict key accu) [] dicts with
+      match List.fold_left ~f:(fun accu dict -> f1 dict key accu) ~init:[]
+              dicts with
       | [] ->
           String.concat "" ["4"; arg; " \n"]
       | cands ->

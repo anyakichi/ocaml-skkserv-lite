@@ -1,10 +1,9 @@
-(*
- * skkserv-lite
- *      SKK server using sqlite3 dictionaries
+(**
+ * SKK server using sqlite3 dictionaries
  *)
 
 open Ext
-
+open StdLabels
 open Unix
 
 let (>>=) = Lwt.(>>=)
@@ -174,7 +173,7 @@ let start_session sock =
   in
   Lwt.on_failure
     (serve session sock sock "" () >>= finalize)
-    (fun e -> Lwt_log.error (Printexc.to_string e); ignore @@ finalize ());
+    (fun e -> Lwt_log.ign_error (Printexc.to_string e); ignore @@ finalize ())
 ;;
 
 let run1 sock =
@@ -295,10 +294,10 @@ let create () =
           | line ->
               try
                 let key, ent =
-                  String.split2 (Encode.utf8_of_eucjp line) ~on:' ' in
+                  String.split2_silent (Encode.utf8_of_eucjp line) ~on:' ' in
                 let subents = Str.split (Str.regexp "/") ent in
-                let xs = List.map (fun e ->
-                    let cand, anno = String.split2 e ~on:';' in
+                let xs = List.map (fun x ->
+                    let cand, anno = String.split2_silent x ~on:';' in
                     (key, cand, anno, !okuri_ari)
                   ) subents
                 in
