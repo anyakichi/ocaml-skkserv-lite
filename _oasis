@@ -1,14 +1,15 @@
-OASISFormat: 0.4
-Name:        skkserv-lite
-Version:     2.0
-Synopsis:    SKK server using sqlite3 dictionaries
-Description: skkserv-lite is a SKK server that uses a sqlite3 database as a
-    dictionary.  It can use multiple dictionaries and respond to a completion
-    request.
-Authors:     INAJIMA Daisuke <inajima@sopht.jp>
-Maintainers: INAJIMA Daisuke <inajima@sopht.jp>
-License:     MIT
-Homepage:    https://github.com/anyakichi/ocaml-skkserv-lite
+OASISFormat:    0.4
+OCamlVersion:   >= 4.01
+Name:           skkserv-lite
+Version:        2.0
+Synopsis:       SKK server using sqlite3 dictionaries
+Authors:        INAJIMA Daisuke <inajima@sopht.jp>
+Maintainers:    INAJIMA Daisuke <inajima@sopht.jp>
+License:        MIT
+Homepage:       https://github.com/anyakichi/ocaml-skkserv-lite
+Description:
+  skkserv-lite is a SKK server that uses a sqlite3 database as a dictionary.
+  It can use multiple dictionaries and respond to a completion request.
 
 Executable "skkserv-lite"
   Path:       src
