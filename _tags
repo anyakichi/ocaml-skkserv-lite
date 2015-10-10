@@ -28,3 +28,5 @@ true: annot, bin_annot
 <src/*.ml{,i,y}>: package(str)
 <src/*.ml{,i,y}>: package(unix)
 # OASIS_STOP
+<src/main.{native,byte}>: package(lwt.unix)
+<src/*.ml{,i,y}>: package(lwt.unix)
