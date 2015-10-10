@@ -15,6 +15,9 @@ setup.ml を使用してビルド・インストールしてください。 ::
   # ocaml setup.ml -build
   # ocaml setup.ml -install
 
+OPAM からインストールすることもできます。 ::
+
+  $ opam install skkserv-lite
 
 使用方法
 ========
