@@ -1,6 +1,6 @@
 OASISFormat: 0.4
 Name:        skkserv-lite
-Version:     2.0b
+Version:     2.0
 Synopsis:    SKK server using sqlite3 dictionaries
 Description: SKK server using sqlite3 dictionaries
 Authors:     INAJIMA Daisuke <inajima@sopht.jp>
@@ -14,3 +14,8 @@ Executable "skkserv-lite"
   MainIs:     main.ml
   BuildDepends: camomile, lwt, lwt.unix, sqlite3, str, unix
   CompiledObject: best
+
+SourceRepository master
+  Type:      git
+  Location:  https://github.com/anyakichi/ocaml-skkserv-lite.git
+  Browser:   https://github.com/anyakichi/ocaml-skkserv-lite
