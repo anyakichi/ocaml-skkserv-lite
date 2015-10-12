@@ -97,7 +97,9 @@ let check_argv () =
 ;;
 
 let open_dictionaries () =
-  dicts := List.rev_map Dict.opendict !rev_argv
+  dicts := List.rev_map !rev_argv ~f:(fun file ->
+    Unix.handle_unix_error Unix.stat file;
+    Dict.opendict file)
 ;;
 
 let create_pid_file file =
